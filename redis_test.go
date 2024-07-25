@@ -10,7 +10,7 @@ import (
 
 func TestGetRedisConfig(t *testing.T) {
 	// test for defaults
-	c, err := getRedisConfig("", "", "", "", "", "")
+	c, err := getRedisConfig("", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Fail(t, "configuration failed with:%v", err)
 	}
@@ -25,7 +25,7 @@ func TestGetRedisConfig(t *testing.T) {
 	assert.Equal(t, "hosts:[{127.0.0.1 6379}] db:0 usetls:false tlsskipverify:true key:logstash", c.String())
 
 	// valid configuration parameter passed
-	c, err = getRedisConfig("", "geheim", "1", "true", "false", "elastic")
+	c, err = getRedisConfig("", "geheim", "1", "", "true", "false", "elastic", "")
 	if err != nil {
 		assert.Fail(t, "configuration failed with:%v", err)
 	}
@@ -36,7 +36,7 @@ func TestGetRedisConfig(t *testing.T) {
 	assert.Equal(t, "elastic", c.key, "key expected to be 'elastic'")
 
 	// valid configuration for hosts without port
-	c, err = getRedisConfig("1.2.3.4", "", "", "", "", "")
+	c, err = getRedisConfig("1.2.3.4", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Fail(t, "configuration failed with:%v", err)
 	}
@@ -45,7 +45,7 @@ func TestGetRedisConfig(t *testing.T) {
 	assert.Equal(t, 6379, c.hosts[0].port, "it is expected to have 6379")
 
 	// valid configuration for hosts with port
-	c, err = getRedisConfig("1.2.3.4:42", "", "", "", "", "")
+	c, err = getRedisConfig("1.2.3.4:42", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Fail(t, "configuration failed with:%v", err)
 	}
@@ -54,7 +54,7 @@ func TestGetRedisConfig(t *testing.T) {
 	assert.Equal(t, 42, c.hosts[0].port, "it is expected to have 6379")
 
 	// valid configuration for hosts with port
-	c, err = getRedisConfig("1.2.3.4:42 1.2.3.5", "", "", "", "", "")
+	c, err = getRedisConfig("1.2.3.4:42 1.2.3.5", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Fail(t, "configuration failed with:%v", err)
 	}
@@ -67,37 +67,37 @@ func TestGetRedisConfig(t *testing.T) {
 	assert.Equal(t, "hosts:[{1.2.3.4 42} {1.2.3.5 6379}] db:0 usetls:false tlsskipverify:true key:logstash", c.String())
 
 	// invalid configurations
-	_, err = getRedisConfig("", "", "A", "", "", "")
+	_, err = getRedisConfig("", "", "A", "", "", "", "", "")
 	if err != nil {
 		assert.Equal(t, "db must be a integer: strconv.Atoi: parsing \"A\": invalid syntax", err.Error())
 	}
 
-	_, err = getRedisConfig("", "", "", "xxx", "", "")
+	_, err = getRedisConfig("", "", "", "", "xxx", "", "", "")
 	if err != nil {
 		assert.Equal(t, "usetls must be a bool: strconv.ParseBool: parsing \"xxx\": invalid syntax", err.Error())
 	}
 
-	_, err = getRedisConfig("", "", "", "", "xxx", "")
+	_, err = getRedisConfig("", "", "", "", "", "xxx", "", "")
 	if err != nil {
 		assert.Equal(t, "tlsskipverify must be a bool: strconv.ParseBool: parsing \"xxx\": invalid syntax", err.Error())
 	}
 
-	_, err = getRedisConfig("ahost:aport", "", "", "", "", "")
+	_, err = getRedisConfig("ahost:aport", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Equal(t, "port must be numeric:strconv.Atoi: parsing \"aport\": invalid syntax", err.Error())
 	}
 
-	_, err = getRedisConfig("ahost:42:43", "", "", "", "", "")
+	_, err = getRedisConfig("ahost:42:43", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Equal(t, "hosts must be in the form host:port but is:ahost:42:43", err.Error())
 	}
 
-	_, err = getRedisConfig("ahost:-1", "", "", "", "", "")
+	_, err = getRedisConfig("ahost:-1", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Equal(t, "port must between 0-65535 not:-1", err.Error())
 	}
 
-	_, err = getRedisConfig("ahost:65536", "", "", "", "", "")
+	_, err = getRedisConfig("ahost:65536", "", "", "", "", "", "", "")
 	if err != nil {
 		assert.Equal(t, "port must between 0-65535 not:65536", err.Error())
 	}
@@ -133,7 +133,7 @@ func TestGetRedisConnectionFromPools(t *testing.T) {
 }
 
 func TestPoolsFromConfiguration(t *testing.T) {
-	cfg, err := getRedisConfig("ahost:23456 bhost:12345 chost:45678", "", "", "", "", "")
+	cfg, err := getRedisConfig("ahost:23456 bhost:12345 chost:45678", "", "", "", "", "", "", "")
 	assert.NoError(t, err, "configuration should be parseable")
 
 	pools := newPoolsFromConfig(cfg)

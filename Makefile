@@ -1,5 +1,5 @@
-SHA := $(shell git rev-parse --short=8 HEAD)
-GITVERSION := $(shell git describe --long --always)
+SHA := $(shell git rev-parse --short=8 HEAD || echo HEAD)
+GITVERSION := $(shell git describe --long --always || echo HEAD)
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 	BUILDDATE := $(shell date --rfc-3339=seconds)

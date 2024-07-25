@@ -6,12 +6,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"text/template"
 
 	"github.com/gomodule/redigo/redis"
 )
 
 type redisClient struct {
 	key   string
+	ttl   int
+	keyTemplate *template.Template
 	pools *redisPools
 }
 
@@ -22,10 +25,12 @@ type redisHost struct {
 type redisConfig struct {
 	hosts         []redisHost
 	db            int
+	ttl           int
 	password      string
 	usetls        bool
 	tlsskipverify bool
 	key           string
+	keyTemplate   *template.Template
 }
 type redisPools struct {
 	pools []*redis.Pool
@@ -54,7 +59,7 @@ func (rc *redisConfig) String() string {
 	return fmt.Sprintf("hosts:%v db:%d usetls:%t tlsskipverify:%t key:%s", rc.hosts, rc.db, rc.usetls, rc.tlsskipverify, rc.key)
 }
 
-func getRedisConfig(hosts, password, db, usetls, tlsskipverify, key string) (*redisConfig, error) {
+func getRedisConfig(hosts, password, db, ttl, usetls, tlsskipverify, key, keyTemplate string) (*redisConfig, error) {
 	rc := &redisConfig{}
 	// defaults
 	if hosts == "" {
@@ -68,6 +73,12 @@ func getRedisConfig(hosts, password, db, usetls, tlsskipverify, key string) (*re
 	}
 	if key == "" {
 		key = "logstash"
+	}
+	if keyTemplate == "" {
+		keyTemplate = "False"
+	}
+	if ttl == "" {
+		ttl = "0"
 	}
 
 	hostAndPorts := strings.Split(hosts, " ")
@@ -101,6 +112,12 @@ func getRedisConfig(hosts, password, db, usetls, tlsskipverify, key string) (*re
 	}
 	rc.db = dbValue
 
+	ttlValue, err := strconv.Atoi(ttl)
+	if err != nil {
+		return nil, fmt.Errorf("ttl must be a integer: %w", err)
+	}
+	rc.ttl = ttlValue
+
 	tls, err := strconv.ParseBool(usetls)
 	if err != nil {
 		return nil, fmt.Errorf("usetls must be a bool: %w", err)
@@ -114,6 +131,18 @@ func getRedisConfig(hosts, password, db, usetls, tlsskipverify, key string) (*re
 	rc.tlsskipverify = tlsverify
 	rc.password = password
 	rc.key = key
+
+	shouldUseKeyTemplateValue, err := strconv.ParseBool(keyTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("keyTemplate must be a bool: %w", err)
+	}
+	if shouldUseKeyTemplateValue {
+		keyTemplateValue, err := template.New("key").Parse(key)
+		if err != nil {
+			return nil, fmt.Errorf("parsing key %s as template failed %w", key, err)
+		}
+		rc.keyTemplate = keyTemplateValue
+	}
 
 	return rc, nil
 }
@@ -151,15 +180,22 @@ func newPoolsFromConfig(rc *redisConfig) *redisPools {
 }
 
 func newPool(host string, port int, db int, password string, usetls, tlsskipverify bool) *redis.Pool {
+	is_unix := strings.HasPrefix(host, "/")
 	server := fmt.Sprintf("%s:%d", host, port)
 	return &redis.Pool{
 		MaxIdle:     3,
 		IdleTimeout: 240 * time.Second,
 		Dial: func() (redis.Conn, error) {
-			c, err := redis.Dial("tcp", server, redis.DialDatabase(db),
-				redis.DialUseTLS(usetls),
-				redis.DialTLSSkipVerify(tlsskipverify),
-			)
+			var c redis.Conn
+			var err error
+			if is_unix {
+				c, err = redis.Dial("unix", host)
+			} else {
+				c, err = redis.Dial("tcp", server, redis.DialDatabase(db),
+					redis.DialUseTLS(usetls),
+					redis.DialTLSSkipVerify(tlsskipverify),
+				)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -195,14 +231,29 @@ func (r *redisClient) send(values []*logmessage) error {
 
 func (r *redisClient) sendImpl(rd asyncConnection, values []*logmessage) error {
 	for _, v := range values {
-		err := rd.Send("RPUSH", r.key, v.data)
+		err := rd.Send("RPUSH", v.key, v.data)
 		if err != nil {
-			v := string(v.data)
-			if len(v) > 15 {
-				v = v[0:12] + "..."
+			d := string(v.data)
+			if len(d) > 15 {
+				d = d[0:12] + "..."
 			}
-			return fmt.Errorf("error setting key %s to %s: %w", r.key, v, err)
+			return fmt.Errorf("error setting key %s to %s: %w", v.key, d, err)
+		}
+		err = r.setTTL(rd, v.key)
+		if err != nil {
+			return err
 		}
 	}
 	return rd.Flush()
+}
+
+func (r *redisClient) setTTL(rd asyncConnection, key string) error {
+	if r.ttl <= 0 {
+		return nil
+	}
+	err := rd.Send("EXPIRE", key, r.ttl)
+	if err != nil {
+		return fmt.Errorf("error setting TTL on key %s to %d: %w", key, r.ttl, err)
+	}
+	return err
 }

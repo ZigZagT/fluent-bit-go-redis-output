@@ -2,6 +2,7 @@ package main
 
 import (
 	"C"
+	"bytes"
 	"fmt"
 	"unsafe"
 
@@ -28,6 +29,7 @@ func FLBPluginRegister(ctx unsafe.Pointer) int {
 
 type logmessage struct {
 	data []byte
+	key  string
 }
 
 type Plugin interface {
@@ -72,12 +74,14 @@ func FLBPluginInit(ctx unsafe.Pointer) int {
 	hosts := plugin.Environment(ctx, "Hosts")
 	password := plugin.Environment(ctx, "Password")
 	key := plugin.Environment(ctx, "Key")
+	keyTemplate := plugin.Environment(ctx, "KeyTemplate")
 	db := plugin.Environment(ctx, "DB")
+	ttl := plugin.Environment(ctx, "TTL")
 	usetls := plugin.Environment(ctx, "UseTLS")
 	tlsskipverify := plugin.Environment(ctx, "TLSSkipVerify")
 
 	// create a pool of redis connection pools
-	config, err := getRedisConfig(hosts, password, db, usetls, tlsskipverify, key)
+	config, err := getRedisConfig(hosts, password, db, ttl, usetls, tlsskipverify, key, keyTemplate)
 	if err != nil {
 		fmt.Printf("configuration errors: %v\n", err)
 		// FIXME use fluent-bit method to err in init
@@ -88,10 +92,14 @@ func FLBPluginInit(ctx unsafe.Pointer) int {
 	rc = &redisClient{
 		pools: newPoolsFromConfig(config),
 		key:   config.key,
+		keyTemplate: config.keyTemplate,
+		ttl:   config.ttl,
 	}
 	fmt.Printf("[out-redis] build:%s version:%s redis connection to: %s\n", builddate, revision, config)
 	return output.FLB_OK
 }
+
+type Rubbish = []interface {}
 
 // FLBPluginFlush is called from fluent-bit when data need to be sent. is called from fluent-bit when data need to be sent.
 //
@@ -118,12 +126,14 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 		// Print record keys and values
 		var timeStamp time.Time
 		switch t := ts.(type) {
+		case Rubbish:
+			timeStamp = ts.(Rubbish)[0].(output.FLBTime).Time
 		case output.FLBTime:
 			timeStamp = ts.(output.FLBTime).Time
 		case uint64:
 			timeStamp = time.Unix(int64(t), 0)
 		default:
-			fmt.Print("given time is not in a known format, defaulting to now.\n")
+			fmt.Printf("given time %T %v is not in a known format, defaulting to now.\n", ts, ts)
 			timeStamp = time.Now()
 		}
 
@@ -141,10 +151,10 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 	err := plugin.Send(logs)
 	if err != nil {
 		fmt.Printf("%v\n", err)
-		return output.FLB_RETRY
+		return output.FLB_ERROR
 	}
 
-	fmt.Printf("pushed %d logs\n", len(logs))
+	// fmt.Printf("pushed %d logs\n", len(logs))
 
 	// Return options:
 	//
@@ -175,12 +185,24 @@ func createJSON(timestamp time.Time, tag string, record map[interface{}]interfac
 	// convert timestamp to RFC3339Nano which is logstash format
 	m["@timestamp"] = timestamp.UTC().Format(time.RFC3339Nano)
 	m["@tag"] = tag
+	key := rc.key
+	if rc.keyTemplate != nil {
+		var tpl bytes.Buffer
+		if err := rc.keyTemplate.Execute(&tpl, m); err != nil {
+			return nil, fmt.Errorf("error rendering key for message: %w", err)
+		}
+		key = tpl.String()
+		// fmt.Printf("keyTemplate %s rendered into %s\n", rc.key, key)
+		// for k, v := range(m) {
+		// 	fmt.Printf("  %v = %v\n",k , v)
+		// }
+	}
 
 	js, err := json.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("error creating message for REDIS: %w", err)
 	}
-	return &logmessage{data: js}, nil
+	return &logmessage{data: js, key: key}, nil
 }
 
 //export FLBPluginExit

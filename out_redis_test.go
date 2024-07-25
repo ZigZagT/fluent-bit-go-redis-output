@@ -34,6 +34,10 @@ func TestParseMap(t *testing.T) {
 }
 
 func TestCreateJSON(t *testing.T) {
+	rc = &redisClient{
+		key:   "abc",
+		keyTemplate: nil,
+	}
 	record := make(map[interface{}]interface{})
 	record["key"] = "value"
 	record["five"] = 5
@@ -87,12 +91,16 @@ func (p *testFluentPlugin) Environment(ctx unsafe.Pointer, key string) string {
 		return "mypasswd"
 	case "Key":
 		return "testkey"
+	case "KeyTemplate":
+		return "True"
 	case "DB":
 		return p.db
 	case "UseTLS":
 		return "false"
 	case "TLSSkipVerify":
 		return "false"
+	case "TTL":
+		return "50"
 	}
 	return "unknown-" + key
 }
